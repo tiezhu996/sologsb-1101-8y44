@@ -25,6 +25,13 @@ export function validateBackup(input: unknown): { ok: boolean; errors: string[];
   for (const key of collections) {
     if (!Array.isArray(obj[key])) errors.push(`${key} 字段缺失或不是数组`)
   }
+  // 复核批次为 v3 新增：旧备份没有这两个字段不算错误，按空数组落库
+  if (obj.reviewBatches !== undefined && !Array.isArray(obj.reviewBatches)) {
+    errors.push('reviewBatches 字段不是数组')
+  }
+  if (obj.reviewItems !== undefined && !Array.isArray(obj.reviewItems)) {
+    errors.push('reviewItems 字段不是数组')
+  }
   if (errors.length > 0) return { ok: false, errors, payload: null }
   const payload: BackupPayload = {
     app: 'gbmuralarch',
@@ -34,19 +41,23 @@ export function validateBackup(input: unknown): { ok: boolean; errors: string[];
     elements: obj.elements ?? [],
     layers: obj.layers ?? [],
     decays: obj.decays ?? [],
-    repairSteps: obj.repairSteps ?? []
+    repairSteps: obj.repairSteps ?? [],
+    reviewBatches: obj.reviewBatches ?? [],
+    reviewItems: obj.reviewItems ?? []
   }
   return { ok: true, errors, payload }
 }
 
 /** 组装当前本地数据的备份对象 */
 export async function buildBackupPayload(): Promise<BackupPayload> {
-  const [halls, elements, layers, decays, repairSteps] = await Promise.all([
+  const [halls, elements, layers, decays, repairSteps, reviewBatches, reviewItems] = await Promise.all([
     db.halls.toArray(),
     db.elements.toArray(),
     db.layers.toArray(),
     db.decays.toArray(),
-    db.repairSteps.toArray()
+    db.repairSteps.toArray(),
+    db.reviewBatches.toArray(),
+    db.reviewItems.toArray()
   ])
   return {
     app: 'gbmuralarch',
@@ -56,7 +67,9 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     elements,
     layers,
     decays,
-    repairSteps
+    repairSteps,
+    reviewBatches,
+    reviewItems
   }
 }
 
@@ -81,7 +94,9 @@ export async function exportBackupJson(): Promise<{ fileName: string; counts: Re
       elements: payload.elements.length,
       layers: payload.layers.length,
       decays: payload.decays.length,
-      repairSteps: payload.repairSteps.length
+      repairSteps: payload.repairSteps.length,
+      reviewBatches: payload.reviewBatches?.length ?? 0,
+      reviewItems: payload.reviewItems?.length ?? 0
     }
   }
 }
@@ -102,15 +117,19 @@ export async function importBackup(
   overwrite: boolean
 ): Promise<Record<string, number>> {
   if (overwrite) await clearAllTables()
+  const reviewBatches = payload.reviewBatches ?? []
+  const reviewItems = payload.reviewItems ?? []
   await db.transaction(
     'rw',
-    [db.halls, db.elements, db.layers, db.decays, db.repairSteps],
+    [db.halls, db.elements, db.layers, db.decays, db.repairSteps, db.reviewBatches, db.reviewItems],
     async () => {
       await db.halls.bulkPut(payload.halls)
       await db.elements.bulkPut(payload.elements)
       await db.layers.bulkPut(payload.layers)
       await db.decays.bulkPut(payload.decays)
       await db.repairSteps.bulkPut(payload.repairSteps)
+      await db.reviewBatches.bulkPut(reviewBatches)
+      await db.reviewItems.bulkPut(reviewItems)
     }
   )
   return {
@@ -118,7 +137,9 @@ export async function importBackup(
     elements: payload.elements.length,
     layers: payload.layers.length,
     decays: payload.decays.length,
-    repairSteps: payload.repairSteps.length
+    repairSteps: payload.repairSteps.length,
+    reviewBatches: reviewBatches.length,
+    reviewItems: reviewItems.length
   }
 }
 
@@ -128,6 +149,7 @@ export function remapIds(payload: BackupPayload): BackupPayload {
   const elementIdMap = new Map<string, string>()
   const layerIdMap = new Map<string, string>()
   const decayIdMap = new Map<string, string>()
+  const batchIdMap = new Map<string, string>()
 
   const halls = payload.halls.map((hall) => {
     const id = createId('hall')
@@ -154,7 +176,18 @@ export function remapIds(payload: BackupPayload): BackupPayload {
     id: createId('step'),
     decayId: decayIdMap.get(step.decayId) ?? step.decayId
   }))
-  return { ...payload, halls, elements, layers, decays, repairSteps }
+  const reviewBatches = (payload.reviewBatches ?? []).map((batch) => {
+    const id = createId('batch')
+    batchIdMap.set(batch.id, id)
+    return { ...batch, id }
+  })
+  const reviewItems = (payload.reviewItems ?? []).map((item) => ({
+    ...item,
+    id: createId('ritem'),
+    batchId: batchIdMap.get(item.batchId) ?? item.batchId,
+    decayId: decayIdMap.get(item.decayId) ?? item.decayId
+  }))
+  return { ...payload, halls, elements, layers, decays, repairSteps, reviewBatches, reviewItems }
 }
 
 /** 生成演示样例数据，便于首次打开即可看到完整链路 */

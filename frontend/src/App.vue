@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Coin, Grid, OfficeBuilding, Tools, WarningFilled } from '@element-plus/icons-vue'
+import { Coin, Grid, Notebook, OfficeBuilding, Tools, WarningFilled } from '@element-plus/icons-vue'
 import { useHallStore } from '@/stores/hallStore'
 import { useRepairStore } from '@/stores/repairStore'
+import { useReviewStore } from '@/stores/reviewStore'
 
 const route = useRoute()
 const router = useRouter()
 const hallStore = useHallStore()
 const repairStore = useRepairStore()
+const reviewStore = useReviewStore()
 
 const navItems = computed(() => {
   const currentHallId = hallStore.currentHallId
@@ -22,6 +24,7 @@ const navItems = computed(() => {
       disabled: !currentHallId
     },
     { path: '/decays', label: '病害档案台', icon: WarningFilled, badge: String(hallStore.totalUnrepaired) },
+    { path: '/review', label: '现场复核', icon: Notebook, badge: reviewStore.openBatchCount > 0 ? String(reviewStore.openBatchCount) : '' },
     { path: '/repair', label: '修复工序', icon: Tools, badge: String(repairStore.totalSteps) },
     { path: '/backup', label: '本地数据', icon: Coin, badge: '' }
   ]

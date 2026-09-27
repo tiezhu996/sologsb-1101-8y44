@@ -24,6 +24,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '病害档案台', icon: 'WarningFilled' }
   },
   {
+    path: '/review',
+    name: 'review-batches',
+    component: () => import('@/pages/ReviewBatches.vue'),
+    meta: { title: '现场复核批次', icon: 'Notebook' }
+  },
+  {
     path: '/repair',
     name: 'repair-plan',
     component: () => import('@/pages/RepairPlan.vue'),

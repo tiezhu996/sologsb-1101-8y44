@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
-import { Delete, Edit, Plus, Tools } from '@element-plus/icons-vue'
+import { Delete, Edit, Notebook, Plus, Tools } from '@element-plus/icons-vue'
 import EmptyPanel from '@/components/common/EmptyPanel.vue'
 import FilterBar, { type FilterModel } from '@/components/common/FilterBar.vue'
 import SeverityTag from '@/components/common/SeverityTag.vue'
@@ -11,6 +11,7 @@ import { useDecayFilter } from '@/hooks/useDecayFilter'
 import { useHallStore } from '@/stores/hallStore'
 import { useDecayStore } from '@/stores/decayStore'
 import { useRepairStore } from '@/stores/repairStore'
+import { useReviewStore } from '@/stores/reviewStore'
 import { DECAY_TYPES, type Decay, type DecayType, type Severity } from '@/types/decay'
 import { SEVERITIES } from '@/types/decay'
 import { formatArea, SEVERITY_COLOR } from '@/utils/severity'
@@ -19,6 +20,7 @@ const router = useRouter()
 const hallStore = useHallStore()
 const decayStore = useDecayStore()
 const repairStore = useRepairStore()
+const reviewStore = useReviewStore()
 
 const {
   filter,
@@ -202,6 +204,17 @@ function goRepair(row: { decay: Decay }): void {
   void router.push('/repair')
 }
 
+/** 把勾选的病害带去现场复核：组成一批，进新建批次对话框 */
+function goCreateReviewBatch(): void {
+  const ids = Array.from(decayStore.selectedIds)
+  if (ids.length === 0) {
+    ElMessage.warning('请先勾选要带出门复核的病害记录')
+    return
+  }
+  reviewStore.setDraftDecayIds(ids)
+  void router.push({ path: '/review', query: { create: '1' } })
+}
+
 function goElements(row: { decay: Decay }): void {
   const layer = decayStore.layers.find((item) => item.id === row.decay.layerId)
   const element = layer ? decayStore.elements.find((item) => item.id === layer.elementId) : undefined
@@ -305,6 +318,11 @@ const severityPalette = SEVERITY_COLOR
 
       <el-button size="small" @click="bulkMarkRepaired(true)">标记已修复</el-button>
       <el-button size="small" @click="bulkMarkRepaired(false)">标记未修复</el-button>
+
+      <span class="batch-bar__label">现场复核</span>
+      <el-button size="small" type="warning" plain :icon="Notebook" @click="goCreateReviewBatch">
+        勾选后组成复核批次
+      </el-button>
     </div>
 
     <div class="section-card">

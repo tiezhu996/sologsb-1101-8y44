@@ -4,9 +4,10 @@ import type { Element } from '@/types/element'
 import type { PaintLayer } from '@/types/layer'
 import type { Decay } from '@/types/decay'
 import type { RepairStep } from '@/types/repair'
+import type { ReviewBatch, ReviewItem } from '@/types/review'
 
 /** 本地结构版本号：新增/修改表结构时必须递增，并补充 upgrade 迁移 */
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 /** 本地存储键名（localStorage 侧的少量元数据） */
 export const LS_KEYS = {
@@ -35,6 +36,9 @@ export interface BackupPayload {
   layers: PaintLayer[]
   decays: Decay[]
   repairSteps: RepairStep[]
+  /** v3 起随备份携带复核批次册子；旧备份没有这两个字段，导入时按空数组处理 */
+  reviewBatches?: ReviewBatch[]
+  reviewItems?: ReviewItem[]
 }
 
 export class MuralArchDatabase extends Dexie {
@@ -43,6 +47,8 @@ export class MuralArchDatabase extends Dexie {
   layers!: Table<PaintLayer, string>
   decays!: Table<Decay, string>
   repairSteps!: Table<RepairStep, string>
+  reviewBatches!: Table<ReviewBatch, string>
+  reviewItems!: Table<ReviewItem, string>
 
   constructor() {
     super('gbmuralarch')
@@ -54,7 +60,7 @@ export class MuralArchDatabase extends Dexie {
       repairSteps: 'id, decayId, seq, state, updatedAt'
     })
     // v2：病害表补充 repairedAt 索引，工序表补充 name 索引
-    this.version(DB_VERSION)
+    this.version(2)
       .stores({
         halls: 'id, name, era, structureType, roofType, updatedAt',
         elements: 'id, hallId, position, status, updatedAt',
@@ -76,6 +82,16 @@ export class MuralArchDatabase extends Dexie {
             }
           })
       })
+    // v3：新增现场复核批次两表（批次册子 + 逐条复核记录），旧库打开时自动补表，数据不动
+    this.version(DB_VERSION).stores({
+      halls: 'id, name, era, structureType, roofType, updatedAt',
+      elements: 'id, hallId, position, status, updatedAt',
+      layers: 'id, elementId, level, patternName, pigment',
+      decays: 'id, layerId, type, severity, repaired, repairedAt, updatedAt',
+      repairSteps: 'id, decayId, seq, name, state, updatedAt',
+      reviewBatches: 'id, status, reviewDate, updatedAt',
+      reviewItems: 'id, batchId, decayId, updatedAt'
+    })
   }
 }
 
@@ -91,14 +107,16 @@ export function createId(prefix: string): string {
 export async function clearAllTables(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.halls, db.elements, db.layers, db.decays, db.repairSteps],
+    [db.halls, db.elements, db.layers, db.decays, db.repairSteps, db.reviewBatches, db.reviewItems],
     async () => {
       await Promise.all([
         db.halls.clear(),
         db.elements.clear(),
         db.layers.clear(),
         db.decays.clear(),
-        db.repairSteps.clear()
+        db.repairSteps.clear(),
+        db.reviewBatches.clear(),
+        db.reviewItems.clear()
       ])
     }
   )
