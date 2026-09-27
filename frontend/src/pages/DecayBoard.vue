@@ -2,17 +2,19 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
-import { Delete, Edit, Plus, Tools } from '@element-plus/icons-vue'
+import { Delete, Edit, Notebook, Plus, Tools } from '@element-plus/icons-vue'
 import EmptyPanel from '@/components/common/EmptyPanel.vue'
 import FilterBar, { type FilterModel } from '@/components/common/FilterBar.vue'
 import SeverityTag from '@/components/common/SeverityTag.vue'
 import StatBadge from '@/components/common/StatBadge.vue'
+import CreateBatchDialog from '@/components/review/CreateBatchDialog.vue'
 import { useDecayFilter } from '@/hooks/useDecayFilter'
 import { useHallStore } from '@/stores/hallStore'
 import { useDecayStore } from '@/stores/decayStore'
 import { useRepairStore } from '@/stores/repairStore'
 import { DECAY_TYPES, type Decay, type DecayType, type Severity } from '@/types/decay'
 import { SEVERITIES } from '@/types/decay'
+import type { ReviewBatch } from '@/types/review'
 import { formatArea, SEVERITY_COLOR } from '@/utils/severity'
 
 const router = useRouter()
@@ -38,6 +40,8 @@ const {
 
 const batchSeverity = ref<Severity>('中度')
 const batchType = ref<DecayType>('起甲')
+const batchDialogVisible = ref(false)
+const presetDecayIds = ref<string[]>([])
 const editDialogVisible = ref(false)
 const editingDecay = ref<Decay | null>(null)
 const editForm = ref<{
@@ -197,6 +201,22 @@ async function bulkMarkRepaired(repaired: boolean): Promise<void> {
   ElMessage.success(`已批量标记 ${ids.length} 条为${repaired ? '已修复' : '未修复'}`)
 }
 
+/** 把勾选的病害组成一批复核册子 */
+function openBatchDialog(): void {
+  if (decayStore.selectedIds.size === 0) {
+    ElMessage.warning('请先勾选本次外出要核的病害记录')
+    return
+  }
+  presetDecayIds.value = Array.from(decayStore.selectedIds)
+  batchDialogVisible.value = true
+}
+
+function onBatchCreated(batch: ReviewBatch): void {
+  decayStore.clearSelection()
+  ElMessage.success(`已建批次「${batch.title}」，入册 ${batch.entries.length} 条`)
+  void router.push('/review')
+}
+
 function goRepair(row: { decay: Decay }): void {
   repairStore.setActiveDecay(row.decay.id)
   void router.push('/repair')
@@ -305,6 +325,8 @@ const severityPalette = SEVERITY_COLOR
 
       <el-button size="small" @click="bulkMarkRepaired(true)">标记已修复</el-button>
       <el-button size="small" @click="bulkMarkRepaired(false)">标记未修复</el-button>
+
+      <el-button size="small" type="primary" :icon="Notebook" @click="openBatchDialog">组成复核批次</el-button>
     </div>
 
     <div class="section-card">
@@ -383,8 +405,9 @@ const severityPalette = SEVERITY_COLOR
       </EmptyPanel>
     </div>
 
-    <el-dialog v-model="editDialogVisible" title="编辑病害记录" width="540px">
-      <el-form :model="editForm" label-width="110px">
+    <CreateBatchDialog v-model="batchDialogVisible" :preset-decay-ids="presetDecayIds" @created="onBatchCreated" />
+
+    <el-dialog v-model="editDialogVisible" title="编辑病害记录" width="540px">      <el-form :model="editForm" label-width="110px">
         <el-form-item label="病害类型">
           <el-select v-model="editForm.type" class="full-width">
             <el-option v-for="item in typeOptionsForEdit" :key="item" :label="item" :value="item" />

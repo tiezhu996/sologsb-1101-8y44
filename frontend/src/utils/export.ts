@@ -25,6 +25,10 @@ export function validateBackup(input: unknown): { ok: boolean; errors: string[];
   for (const key of collections) {
     if (!Array.isArray(obj[key])) errors.push(`${key} 字段缺失或不是数组`)
   }
+  // reviewBatches 为 v3 新增：旧备份没有该字段照常导入，有则必须是数组
+  if (obj.reviewBatches !== undefined && !Array.isArray(obj.reviewBatches)) {
+    errors.push('reviewBatches 字段不是数组')
+  }
   if (errors.length > 0) return { ok: false, errors, payload: null }
   const payload: BackupPayload = {
     app: 'gbmuralarch',
@@ -34,19 +38,21 @@ export function validateBackup(input: unknown): { ok: boolean; errors: string[];
     elements: obj.elements ?? [],
     layers: obj.layers ?? [],
     decays: obj.decays ?? [],
-    repairSteps: obj.repairSteps ?? []
+    repairSteps: obj.repairSteps ?? [],
+    reviewBatches: Array.isArray(obj.reviewBatches) ? obj.reviewBatches : []
   }
   return { ok: true, errors, payload }
 }
 
 /** 组装当前本地数据的备份对象 */
 export async function buildBackupPayload(): Promise<BackupPayload> {
-  const [halls, elements, layers, decays, repairSteps] = await Promise.all([
+  const [halls, elements, layers, decays, repairSteps, reviewBatches] = await Promise.all([
     db.halls.toArray(),
     db.elements.toArray(),
     db.layers.toArray(),
     db.decays.toArray(),
-    db.repairSteps.toArray()
+    db.repairSteps.toArray(),
+    db.reviewBatches.toArray()
   ])
   return {
     app: 'gbmuralarch',
@@ -56,7 +62,8 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     elements,
     layers,
     decays,
-    repairSteps
+    repairSteps,
+    reviewBatches
   }
 }
 
@@ -81,7 +88,8 @@ export async function exportBackupJson(): Promise<{ fileName: string; counts: Re
       elements: payload.elements.length,
       layers: payload.layers.length,
       decays: payload.decays.length,
-      repairSteps: payload.repairSteps.length
+      repairSteps: payload.repairSteps.length,
+      reviewBatches: payload.reviewBatches.length
     }
   }
 }
@@ -104,13 +112,14 @@ export async function importBackup(
   if (overwrite) await clearAllTables()
   await db.transaction(
     'rw',
-    [db.halls, db.elements, db.layers, db.decays, db.repairSteps],
+    [db.halls, db.elements, db.layers, db.decays, db.repairSteps, db.reviewBatches],
     async () => {
       await db.halls.bulkPut(payload.halls)
       await db.elements.bulkPut(payload.elements)
       await db.layers.bulkPut(payload.layers)
       await db.decays.bulkPut(payload.decays)
       await db.repairSteps.bulkPut(payload.repairSteps)
+      await db.reviewBatches.bulkPut(payload.reviewBatches)
     }
   )
   return {
@@ -118,7 +127,8 @@ export async function importBackup(
     elements: payload.elements.length,
     layers: payload.layers.length,
     decays: payload.decays.length,
-    repairSteps: payload.repairSteps.length
+    repairSteps: payload.repairSteps.length,
+    reviewBatches: payload.reviewBatches.length
   }
 }
 
@@ -154,7 +164,16 @@ export function remapIds(payload: BackupPayload): BackupPayload {
     id: createId('step'),
     decayId: decayIdMap.get(step.decayId) ?? step.decayId
   }))
-  return { ...payload, halls, elements, layers, decays, repairSteps }
+  // 批次本身重新分配 id，册内条目跟随病害的新 id，前后对照快照原样保留
+  const reviewBatches = payload.reviewBatches.map((batch) => ({
+    ...batch,
+    id: createId('rev'),
+    entries: batch.entries.map((entry) => ({
+      ...entry,
+      decayId: decayIdMap.get(entry.decayId) ?? entry.decayId
+    }))
+  }))
+  return { ...payload, halls, elements, layers, decays, repairSteps, reviewBatches }
 }
 
 /** 生成演示样例数据，便于首次打开即可看到完整链路 */
@@ -164,10 +183,14 @@ export async function seedDemoData(): Promise<void> {
   const elementIds = [createId('elem'), createId('elem')]
   const layerIds = elementIds.map(() => createId('lay'))
   const decayIds = layerIds.map(() => createId('dec'))
+  const today = new Date(now)
+  const reviewDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+    today.getDate()
+  ).padStart(2, '0')}`
 
   await db.transaction(
     'rw',
-    [db.halls, db.elements, db.layers, db.decays, db.repairSteps],
+    [db.halls, db.elements, db.layers, db.decays, db.repairSteps, db.reviewBatches],
     async () => {
       await db.halls.put({
         id: hallId,
@@ -274,6 +297,37 @@ export async function seedDemoData(): Promise<void> {
           updatedAt: now
         }
       ])
+      // 样例复核批次：已交卷，一条改判（中度 → 重度，与上面档案现值一致）、一条维持原判
+      await db.reviewBatches.put({
+        id: createId('rev'),
+        title: '现场复核 · 大雄宝殿',
+        reviewer: '李文博',
+        reviewDate,
+        state: 'submitted',
+        entries: [
+          {
+            decayId: decayIds[0],
+            label: '大雄宝殿 / 前檐明间额枋（檐下） / 第 1 层 · 旋子 · 石青',
+            beforeType: '起甲',
+            beforeSeverity: '中度',
+            newType: null,
+            newSeverity: '重度',
+            fieldNote: '现场见起甲边缘成片翘起，轻触即脱落，范围较档案记录扩大，改判重度。'
+          },
+          {
+            decayId: decayIds[1],
+            label: '大雄宝殿 / 七架梁（梁枋） / 第 1 层 · 苏式 · 土黄',
+            beforeType: '龟裂',
+            beforeSeverity: '中度',
+            newType: null,
+            newSeverity: null,
+            fieldNote: ''
+          }
+        ],
+        submittedAt: now,
+        createdAt: now,
+        updatedAt: now
+      })
     }
   )
 }
